@@ -17,7 +17,7 @@ import java.util.Map;
 public class CopySpellAbilityAi extends SpellAbilityAi {
 
     @Override
-    protected boolean canPlayAI(Player aiPlayer, SpellAbility sa) {
+    protected AiAbilityDecision canPlayAI(Player aiPlayer, SpellAbility sa) {
         Game game = aiPlayer.getGame();
         int chance = ((PlayerControllerAi)aiPlayer.getController()).getAi().getIntProperty(AiProps.CHANCE_TO_COPY_OWN_SPELL_WHILE_ON_STACK);
         int diff = ((PlayerControllerAi)aiPlayer.getController()).getAi().getIntProperty(AiProps.ALWAYS_COPY_SPELL_IF_CMC_DIFF);
@@ -110,21 +110,37 @@ public class CopySpellAbilityAi extends SpellAbilityAi {
     }
 
     @Override
-    protected boolean doTriggerAINoCost(Player aiPlayer, SpellAbility sa, boolean mandatory) {
+    protected AiAbilityDecision doTriggerAINoCost(Player aiPlayer, SpellAbility sa, boolean mandatory) {
         // the AI should not miss mandatory activations (e.g. Precursor Golem trigger)
         String logic = sa.getParamOrDefault("AILogic", "");
-        return mandatory || logic.contains("Always"); // this includes logic like AlwaysIfViable
+
+        if (mandatory) {
+            return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
+        }
+
+        if (logic.contains("Always")) {
+            // If the logic is "Always" or "AlwaysIfViable", we will always play this ability
+            return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
+        }
+
+        return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
     }
 
     @Override
-    public boolean chkAIDrawback(final SpellAbility sa, final Player aiPlayer) {
+    public AiAbilityDecision chkAIDrawback(final SpellAbility sa, final Player aiPlayer) {
         if ("ChainOfSmog".equals(sa.getParam("AILogic"))) {
             return SpecialCardAi.ChainOfSmog.consider(aiPlayer, sa);
         } else if ("ChainOfAcid".equals(sa.getParam("AILogic"))) {
             return SpecialCardAi.ChainOfAcid.consider(aiPlayer, sa);
         }
 
-        return canPlayAI(aiPlayer, sa) || (sa.isMandatory() && super.chkAIDrawback(sa, aiPlayer));
+        AiAbilityDecision decision = canPlayAI(aiPlayer, sa);
+        if (!decision.willingToPlay()) {
+            if (sa.isMandatory()) {
+                return super.chkAIDrawback(sa, aiPlayer);
+            }
+        }
+        return decision;
     }
 
     @Override

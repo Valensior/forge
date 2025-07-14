@@ -203,7 +203,7 @@ public class SpecialCardAi {
 
     // Chain of Acid
     public static class ChainOfAcid {
-        public static boolean consider(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision consider(final Player ai, final SpellAbility sa) {
             List<Card> AiLandsOnly = CardLists.filter(ai.getCardsIn(ZoneType.Battlefield),
                     CardPredicates.LANDS);
             List<Card> OppPerms = CardLists.filter(ai.getOpponents().getCardsIn(ZoneType.Battlefield),
@@ -213,13 +213,22 @@ public class SpecialCardAi {
             // which it can only distinguish by their CMC, considering >CMC higher value).
             // Currently ensures that the AI will still have lands provided that the human player goes to
             // destroy all the AI's lands in order (to avoid manalock).
-            return !OppPerms.isEmpty() && AiLandsOnly.size() > OppPerms.size() + 2;
+            if  (!OppPerms.isEmpty() && AiLandsOnly.size() > OppPerms.size() + 2) {
+                // If there are enough lands, target the worst non-creature permanent of the opponent
+                Card worstOppPerm = ComputerUtilCard.getWorstAI(OppPerms);
+                if (worstOppPerm != null) {
+                    sa.resetTargets();
+                    sa.getTargets().add(worstOppPerm);
+                    return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
+                }
+            }
+            return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
         }
     }
 
     // Chain of Smog
     public static class ChainOfSmog {
-        public static boolean consider(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision consider(final Player ai, final SpellAbility sa) {
             if (ai.getCardsIn(ZoneType.Hand).isEmpty()) {
                 // to avoid failure to add to stack, provide a legal target opponent first (choosing random at this point)
                 // TODO: this makes the AI target opponents with 0 cards in hand, but bailing from here causes a
@@ -235,10 +244,10 @@ public class SpecialCardAi {
 
                 sa.getParent().resetTargets();
                 sa.getParent().getTargets().add(targOpp);
-                return true;
+                return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
             }
 
-            return false;
+            return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
         }
     }
 
@@ -426,17 +435,17 @@ public class SpecialCardAi {
             return false;
         }
 
-        public static boolean considerDonatingPermanent(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision considerDonatingPermanent(final Player ai, final SpellAbility sa) {
             Card donateTarget = ComputerUtil.getCardPreference(ai, sa.getHostCard(), "DonateMe", CardLists.filter(ai.getCardsIn(ZoneType.Battlefield).threadSafeIterable(), CardPredicates.hasSVar("DonateMe")));
             if (donateTarget != null) {
                 sa.resetTargets();
                 sa.getTargets().add(donateTarget);
-                return true;
+                return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
             }
 
             // Should never get here because targetOpponent, called before targetPermanentToDonate, should already have made the AI bail
             System.err.println("Warning: Donate AI failed at SpecialCardAi.Donate#targetPermanentToDonate despite successfully targeting an opponent first.");
-            return false;
+            return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
         }
     }
 
@@ -1042,29 +1051,33 @@ public class SpecialCardAi {
             return exiledWith == null || (tgt != null && ComputerUtilCard.evaluateCreature(tgt) > ComputerUtilCard.evaluateCreature(exiledWith));
         }
 
-        public static boolean considerCopy(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision considerCopy(final Player ai, final SpellAbility sa) {
             final Card source = sa.getHostCard();
             final Card exiledWith = source.getImprintedCards().isEmpty() ? null : source.getImprintedCards().getFirst();
 
             if (exiledWith == null) {
-                return false;
+                return new AiAbilityDecision(0, AiPlayDecision.MissingNeededCards);
             }
 
             // We want to either be able to attack with the creature, or keep it until our opponent's end of turn as a
             // potential blocker
-            return ComputerUtilCard.doesSpecifiedCreatureAttackAI(ai, exiledWith)
+            if (ComputerUtilCard.doesSpecifiedCreatureAttackAI(ai, exiledWith)
                     || (ai.getGame().getPhaseHandler().getPlayerTurn().isOpponentOf(ai) && ai.getGame().getCombat() != null
-                    && !ai.getGame().getCombat().getAttackers().isEmpty());
+                    && !ai.getGame().getCombat().getAttackers().isEmpty())) {
+                return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
+            } else {
+                return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
+            }
         }
     }
 
     // Momir Vig, Simic Visionary Avatar
     public static class MomirVigAvatar {
-        public static boolean consider(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision consider(final Player ai, final SpellAbility sa) {
             Card source = sa.getHostCard();
 
             if (source.getGame().getPhaseHandler().getPhase().isBefore(PhaseType.MAIN1)) {
-                return false;
+                return new AiAbilityDecision(0, AiPlayDecision.AnotherTime);
             }
 
             // In MoJhoSto, prefer Jhoira sorcery ability from time to time
@@ -1075,7 +1088,7 @@ public class SpecialCardAi {
                 int numLandsForJhoira = aic.getIntProperty(AiProps.MOJHOSTO_NUM_LANDS_TO_ACTIVATE_JHOIRA);
 
                 if (ai.getLandsInPlay().size() >= numLandsForJhoira && MyRandom.percentTrue(chanceToPrefJhoira)) {
-                    return false;
+                    return new AiAbilityDecision(0, AiPlayDecision.AnotherTime);
                 }
             }
 
@@ -1084,7 +1097,7 @@ public class SpecialCardAi {
 
             // Some basic strategy for Momir
             if (tokenSize < 2) {
-                return false;
+                return new AiAbilityDecision(0, AiPlayDecision.AnotherTime);
             }
 
             if (tokenSize > 11) {
@@ -1093,7 +1106,7 @@ public class SpecialCardAi {
 
             sa.setXManaCostPaid(tokenSize);
 
-            return true;
+            return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
         }
     }
 
@@ -1304,7 +1317,7 @@ public class SpecialCardAi {
             }
         }
 
-        public static boolean considerSecondTarget(final Player ai, final SpellAbility sa) {
+        public static AiAbilityDecision considerSecondTarget(final Player ai, final SpellAbility sa) {
             Card firstTgt = sa.getParent().getTargetCard();
             CardCollection candidates = ai.getOpponents().getCardsIn(ZoneType.Battlefield).filter(
                     CardPredicates.sharesCardTypeWith(firstTgt).and(CardPredicates.isTargetableBy(sa)));
@@ -1312,9 +1325,9 @@ public class SpecialCardAi {
             if (secondTgt != null) {
                 sa.resetTargets();
                 sa.getTargets().add(secondTgt);
-                return true;
+                return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
             } else {
-                return false;
+                return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
             }
         }
     }
